@@ -27,6 +27,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.MalformedURLException;
@@ -81,6 +82,10 @@ import org.apache.commons.io.input.CloseShieldInputStream;
 import org.apache.commons.io.monitor.FileAlterationListenerAdaptor;
 import org.apache.commons.io.monitor.FileAlterationObserver;
 import org.apache.maven.artifact.versioning.ComparableVersion;
+
+import org.jline.terminal.Terminal;
+import org.jline.terminal.TerminalBuilder;
+import org.jline.utils.NonBlockingReader;
 
 import io.openliberty.tools.ant.ServerTask;
 
@@ -2415,6 +2420,9 @@ public abstract class DevUtil extends AbstractContainerSupportUtil {
 
     private class HotkeyReader implements Runnable {
         private Scanner scanner;
+        private Terminal terminal;
+        private NonBlockingReader nbr;
+        private PrintWriter pw;
         private ThreadPoolExecutor executor;
         private boolean shutdown = false;
 
@@ -2427,11 +2435,24 @@ public abstract class DevUtil extends AbstractContainerSupportUtil {
             debug("Running hotkey reader thread");
             scanner = new Scanner(new CloseShieldInputStream(System.in)); // shield allows us to close the scanner
                                                                           // without closing System.in.
+
             try {
                 readInput();
             } finally {
                 scanner.close();
             }
+            try {
+                terminal = TerminalBuilder.builder().jna(true).jansi(false).system(true).build();
+                terminal.enterRawMode();
+                nbr = terminal.reader();
+                pw = terminal.writer();
+                readInput();
+            } catch (Exception e) {
+                // TODO: handle exception
+            } finally {
+                // TODO: close the terminal
+            }
+
         }
 
         public void shutdown() {
@@ -2442,20 +2463,28 @@ public abstract class DevUtil extends AbstractContainerSupportUtil {
             HotKey q = new HotKey("q", "Detected exit command");
             HotKey h = new HotKey("h", "message");
             HotKey r = new HotKey("r", "Detected restart command");
-            if (scanner.hasNextLine()) {
-                synchronized (inputUnavailable) {
-                    inputUnavailable.notify();
-                }
+            String input = "";
+            if (input != "q") {
+                // TODO: figure out what this does
+                // synchronized (inputUnavailable) {
+                // inputUnavailable.notify();
+                // }
                 while (!shutdown) {
                     debug("Waiting for Enter key to run tests");
-                    if (!scanner.hasNextLine()) {
-                        break;
+                    // if (!scanner.hasNextLine()) {
+                    // break;
+                    // }
+                    // String line = scanner.nextLine();
+                    try {
+                        input = Character.toString((char) nbr.read());
+                    } catch (IOException e1) {
+                        // TODO Auto-generated catch block
+                        e1.printStackTrace();
                     }
-                    String line = scanner.nextLine();
-                    if (q.checkKeyPress(line, "quit")){
+                    if (q.checkKeyPress(input, "quit")) {
                         debug(q.printMessage());
                         runShutdownHook(executor);
-                    } else if (r.checkKeyPress(line, "restart")){
+                    } else if (r.checkKeyPress(input, "restart")) {
                         debug(r.printMessage());
                         try {
                             restartServer(true);
@@ -2464,7 +2493,7 @@ public abstract class DevUtil extends AbstractContainerSupportUtil {
                             error("Could not restart the server.", e);
                             runShutdownHook(executor);
                         }
-                    } else if (h.checkKeyPress(line, "help")){
+                    } else if (h.checkKeyPress(input, "help")) {
                         info(formatAttentionBarrier());
                         if (container) {
                             info(formatAttentionMessage(
